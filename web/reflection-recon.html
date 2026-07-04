@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>REFLECTION-RECON // forensic bench v3 (corrected methods)</title>
+<style>
+  :root{
+    --bg:#080b11;--panel:#0e131c;--panel-2:#131a26;--line:#1e2836;--line-2:#2b3a4f;
+    --ink:#c8d4e2;--ink-dim:#6d7d92;--signal:#54e6c1;--signal-dim:#2a7a68;
+    --live:#ffb454;--alert:#ff6a6a;--match:#54e6c1;
+    --mono:'JetBrains Mono','IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+    --disp:'Archivo','Arial Narrow',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 600px at 80% -10%,#0d1622 0%,transparent 60%),var(--bg);
+    color:var(--ink);font-family:var(--mono);font-size:13px;-webkit-font-smoothing:antialiased;letter-spacing:.2px}
+  a{color:var(--signal)}
+  .wrap{max-width:1440px;margin:0 auto;padding:20px 22px 60px}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:16px}
+  .mark{font-family:var(--disp);font-weight:800;font-size:26px;letter-spacing:2px;text-transform:uppercase}
+  .mark b{color:var(--signal)}
+  .sub{color:var(--ink-dim);font-size:11px;letter-spacing:1.5px;text-transform:uppercase}
+  .spacer{flex:1}
+  .stamp{border:1px solid var(--line-2);padding:4px 9px;color:var(--ink-dim);font-size:10px;letter-spacing:1.5px;text-transform:uppercase}
+  .stamp.on{color:var(--live);border-color:var(--live)}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ink-dim);margin-right:7px;vertical-align:middle}
+  .stamp.on .dot{background:var(--live);box-shadow:0 0 10px var(--live);animation:pulse 1.1s infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  .tabs{display:flex;gap:2px;margin-bottom:16px;border:1px solid var(--line);width:max-content}
+  .tabs button{background:var(--panel);border:0;border-right:1px solid var(--line);color:var(--ink-dim);
+    font-family:var(--disp);letter-spacing:2px;text-transform:uppercase;font-size:12px;padding:10px 22px;cursor:pointer}
+  .tabs button:last-child{border-right:0}
+  .tabs button.active{background:#0c221d;color:var(--signal)}
+  .grid{display:grid;grid-template-columns:1fr 1fr 300px;gap:16px}
+  @media (max-width:1120px){.grid{grid-template-columns:1fr 1fr}.controls{grid-column:1/-1}}
+  @media (max-width:720px){.grid{grid-template-columns:1fr}}
+  .stage{background:var(--panel);border:1px solid var(--line);position:relative}
+  .stage h2{margin:0;font-family:var(--disp);font-weight:700;font-size:12px;letter-spacing:2px;text-transform:uppercase;
+    color:var(--ink-dim);padding:9px 12px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+  .stage h2 span{color:var(--signal-dim);font-size:10px}
+  .canvas-hold{position:relative;background:repeating-conic-gradient(#0a0f16 0% 25%,#0c131c 0% 50%) 50%/16px 16px;
+    display:flex;align-items:center;justify-content:center;min-height:230px}
+  canvas{display:block;max-width:100%;height:auto}
+  #srcCanvas{cursor:crosshair}
+  .hint{position:absolute;left:10px;bottom:8px;font-size:10px;color:var(--ink-dim);background:#0009;padding:3px 7px;border:1px solid var(--line);letter-spacing:1px}
+  .controls{background:var(--panel);border:1px solid var(--line);align-self:start}
+  .group{border-bottom:1px solid var(--line);padding:13px 14px}
+  .group:last-child{border-bottom:0}
+  .glabel{font-family:var(--disp);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--ink-dim);margin-bottom:11px;display:flex;justify-content:space-between}
+  .glabel i{font-style:normal;color:var(--signal-dim)}
+  .seg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px}
+  .seg.two{grid-template-columns:1fr 1fr}
+  .seg button,.btn{background:var(--panel-2);border:1px solid var(--line-2);color:var(--ink-dim);font-family:var(--mono);
+    font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;padding:7px 4px;cursor:pointer;transition:.12s}
+  .seg button:hover,.btn:hover{border-color:var(--signal-dim);color:var(--ink)}
+  .seg button.active{background:#0c221d;border-color:var(--signal);color:var(--signal)}
+  .row{display:flex;align-items:center;justify-content:space-between;margin:10px 0}
+  .row label{color:var(--ink-dim);font-size:11px}
+  .row output{color:var(--signal);font-size:11px;min-width:52px;text-align:right}
+  input[type=range]{-webkit-appearance:none;width:100%;height:3px;background:var(--line-2);outline:none;margin:7px 0}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;background:var(--signal);cursor:pointer;border:2px solid var(--bg)}
+  input[type=range]::-moz-range-thumb{width:13px;height:13px;background:var(--signal);cursor:pointer;border:2px solid var(--bg);border-radius:0}
+  .toggle{display:flex;align-items:center;gap:9px;cursor:pointer;margin:9px 0;color:var(--ink-dim);font-size:11px;user-select:none}
+  .toggle .box{width:15px;height:15px;border:1px solid var(--line-2);display:grid;place-items:center;transition:.12s;flex:0 0 auto}
+  .toggle.on .box{background:var(--signal);border-color:var(--signal)}
+  .toggle.on .box::after{content:"";width:7px;height:7px;background:var(--bg)}
+  .toggle.on{color:var(--ink)}
+  .fullbtn{width:100%;background:#0c221d;border:1px solid var(--signal);color:var(--signal);padding:9px;font-family:var(--disp);
+    letter-spacing:2px;text-transform:uppercase;font-size:12px;cursor:pointer;transition:.12s}
+  .fullbtn:hover{background:#12352c}
+  .fullbtn.stop{background:#2a1414;border-color:var(--alert);color:var(--alert)}
+  .fullbtn.stop:hover{background:#3a1a1a}
+  .stat{display:flex;justify-content:space-between;font-size:10.5px;color:var(--ink-dim);padding:3px 0;letter-spacing:.5px}
+  .stat b{color:var(--ink);font-weight:400}.stat b.sig{color:var(--signal)}
+  input[type=file]{display:none}
+  .hide{display:none!important}
+  .gauge{margin:10px 0}
+  .gauge .top{display:flex;justify-content:space-between;font-size:10.5px;color:var(--ink-dim);margin-bottom:4px;letter-spacing:.5px}
+  .gauge .top b{color:var(--ink)}
+  .bar{height:8px;background:var(--panel-2);border:1px solid var(--line-2);position:relative;overflow:hidden}
+  .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--signal-dim);width:0%}
+  .verdict{margin-top:6px;text-align:center;font-family:var(--disp);letter-spacing:2px;text-transform:uppercase;font-size:13px;
+    padding:8px;border:1px solid var(--line-2);color:var(--ink-dim)}
+  .verdict.match{color:var(--match);border-color:var(--match);background:#0c221d}
+  .verdict.no{color:var(--alert);border-color:var(--alert);background:#2a1414}
+  .busy{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#080b11cc;
+    color:var(--signal);font-family:var(--disp);letter-spacing:2px;text-transform:uppercase;font-size:12px}
+  .busy.on{display:flex}
+  .notes{margin-top:22px;border:1px solid var(--line);background:var(--panel);padding:18px 22px;line-height:1.65;color:var(--ink-dim);font-size:12px}
+  .notes h3{font-family:var(--disp);letter-spacing:2px;text-transform:uppercase;color:var(--ink);font-size:13px;margin:0 0 10px}
+  .notes b{color:var(--ink)}.notes code{color:var(--signal);background:#0c221d;padding:1px 5px;font-size:11px}
+  .warn{border-left:2px solid var(--live);padding-left:12px;color:#d9c7a3;margin:14px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="mark">reflection<b>·</b>recon <span style="font-size:12px;color:var(--signal-dim)">v3</span></div>
+      <div class="sub">corrected methods — haar residual · fft-pce · log-polar registration · estimated-psf deconv</div>
+    </div>
+    <div class="spacer"></div>
+    <div class="stamp" id="fpsStamp">— fps</div>
+    <div class="stamp" id="liveStamp"><span class="dot"></span>standby</div>
+  </header>
+
+  <div class="tabs">
+    <button id="tabRecon" class="active">reflection recon</button>
+    <button id="tabSensor">sensor forensics</button>
+  </div>
+
+  <div class="grid">
+    <section class="stage">
+      <h2>01 · source feed <span id="srcMeta">no signal</span></h2>
+      <div class="canvas-hold">
+        <canvas id="srcCanvas" width="640" height="480"></canvas>
+        <div class="hint" id="srcHint">start capture to acquire feed</div>
+      </div>
+    </section>
+
+    <section class="stage">
+      <h2><span id="outTitle">02 · reconstruction</span> <span id="outMeta">idle</span></h2>
+      <div class="canvas-hold">
+        <canvas id="outCanvas" width="384" height="384"></canvas>
+        <div class="busy" id="busy">working…</div>
+      </div>
+    </section>
+
+    <aside class="controls">
+      <div class="group">
+        <div class="glabel">capture <i id="srcState">off</i></div>
+        <button class="fullbtn" id="startBtn">▶ start webcam</button>
+        <div class="seg two" style="margin-top:8px">
+          <button class="btn" id="loadVideo">load video…</button>
+          <button class="btn" id="loadImage">load image…</button>
+        </div>
+        <input type="file" id="videoFile" accept="video/*">
+        <input type="file" id="imageFile" accept="image/*">
+      </div>
+
+      <!-- RECON -->
+      <div id="reconCtl">
+        <div class="group">
+          <div class="glabel">target region</div>
+          <div class="seg">
+            <button class="btn active" data-region="rEye">R eye</button>
+            <button class="btn" data-region="lEye">L eye</button>
+            <button class="btn" data-region="both">both</button>
+            <button class="btn" data-region="glasses">glasses</button>
+            <button class="btn" data-region="roi">manual</button>
+            <button class="btn" data-region="full">full</button>
+          </div>
+          <div class="row" style="margin-top:12px"><label>roi padding</label><output id="padOut">40%</output></div>
+          <input type="range" id="pad" min="0" max="120" value="40">
+        </div>
+
+        <div class="group">
+          <div class="glabel">integration <i id="stackState">off</i></div>
+          <div class="toggle" id="stackTog"><span class="box"></span> temporal integrate (shift-and-add)</div>
+          <div class="row" style="margin-top:6px"><label>frame registration</label></div>
+          <div class="seg">
+            <button class="btn active" data-reg="translation">shift</button>
+            <button class="btn" data-reg="rst">rot+scale</button>
+            <button class="btn" data-reg="none">none</button>
+          </div>
+          <div class="row" style="margin-top:10px"><label>frames stacked</label><output id="framesOut" class="sig">0</output></div>
+          <div class="row"><label>last align</label><output id="alignOut">—</output></div>
+          <button class="btn" id="resetStack" style="width:100%">reset integration</button>
+        </div>
+
+        <div class="group">
+          <div class="glabel">deconvolution <i>richardson–lucy</i></div>
+          <div class="row"><label>iterations</label><output id="rlIterOut">15</output></div>
+          <input type="range" id="rlIter" min="0" max="40" value="15">
+          <div class="row"><label>psf source</label></div>
+          <div class="seg two">
+            <button class="btn active" data-psf="catchlight">catchlight</button>
+            <button class="btn" data-psf="gauss">gaussian</button>
+          </div>
+          <div class="row" style="margin-top:8px"><label>psf size / σ</label><output id="psfOut">15</output></div>
+          <input type="range" id="psfSize" min="7" max="25" step="2" value="15">
+          <button class="btn" id="deconvBtn" style="width:100%;margin-top:8px">▶ deconvolve current stack</button>
+        </div>
+
+        <div class="group">
+          <div class="glabel">enhance</div>
+          <div class="toggle on" id="autoTog"><span class="box"></span> auto-stretch contrast</div>
+          <div class="row"><label>contrast</label><output id="coOut">1.0×</output></div>
+          <input type="range" id="contrast" min="10" max="400" value="100">
+          <div class="row"><label>compare raw ⇄ processed</label><output id="cmpOut">100%</output></div>
+          <input type="range" id="cmp" min="0" max="100" value="100">
+          <button class="btn" id="snap" style="width:100%;margin-top:8px">⤓ save frame (png)</button>
+        </div>
+
+        <div class="group">
+          <div class="glabel">telemetry</div>
+          <div class="stat"><span>face lock</span><b id="tFace">—</b></div>
+          <div class="stat"><span>roi source px</span><b id="tRoi">—</b></div>
+          <div class="stat"><span>tile</span><b>256×256</b></div>
+          <div class="stat"><span>noise floor (σ)</span><b id="tNoise" class="sig">—</b></div>
+        </div>
+      </div>
+
+      <!-- SENSOR -->
+      <div id="sensorCtl" class="hide">
+        <div class="group">
+          <div class="glabel">prnu workflow <i>haar · fft-pce</i></div>
+          <div style="font-size:10.5px;color:var(--ink-dim);line-height:1.55;margin-bottom:10px">
+            1 · enroll on <b style="color:var(--ink)">flat, bright, smooth</b> frames.<br>
+            2 · verify any frame. Residual uses a Haar wavelet soft-threshold; PCE is the full FFT statistic.
+          </div>
+          <button class="fullbtn" id="enrollBtn">● enroll fingerprint</button>
+          <div class="row" style="margin-top:10px"><label>frames enrolled</label><output id="enrollN" class="sig">0</output></div>
+          <button class="btn" id="verifyBtn" style="width:100%">▶ verify current frame</button>
+          <button class="btn" id="resetPrnu" style="width:100%;margin-top:6px">reset fingerprint</button>
+        </div>
+        <div class="group">
+          <div class="glabel">denoiser</div>
+          <div class="row"><label>noise σ (soft-thresh)</label><output id="sigOut">3.0</output></div>
+          <input type="range" id="sigma" min="10" max="80" value="30">
+          <div class="row"><label>haar levels</label><output id="lvlOut">4</output></div>
+          <input type="range" id="levels" min="1" max="6" value="4">
+        </div>
+        <div class="group">
+          <div class="glabel">match statistics</div>
+          <div class="gauge"><div class="top"><span>ncc</span><b id="nccVal">—</b></div><div class="bar"><i id="nccBar"></i></div></div>
+          <div class="gauge"><div class="top"><span>pce (fft)</span><b id="pceVal">—</b></div><div class="bar"><i id="pceBar"></i></div></div>
+          <div class="verdict" id="verdict">awaiting verify</div>
+          <div style="font-size:10px;color:var(--ink-dim);line-height:1.5;margin-top:8px">
+            PCE &gt; ~50 = confident same-sensor match. Small tiles + jpeg depress values; NCC sign is the cleaner cue at low res.
+          </div>
+        </div>
+        <div class="group">
+          <div class="glabel">view</div>
+          <div class="seg two">
+            <button class="btn active" data-sview="residual">residual W</button>
+            <button class="btn" data-sview="print">fingerprint K̂</button>
+          </div>
+          <button class="btn" id="snap2" style="width:100%;margin-top:8px">⤓ save view (png)</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="notes">
+    <h3>this build uses the corrected DSP core</h3>
+    <p>Unlike the lightweight demo, v3 runs the validated numerical core: a <b>Haar wavelet soft-threshold
+    denoiser</b> for the PRNU residual, <b>FFT-based PCE</b> over the full circular cross-correlation surface,
+    <b>log-polar (Fourier-Mellin) registration</b> for rotation and scale, and <b>Richardson–Lucy</b>
+    deconvolution driven by a PSF estimated from the eye's catchlight. Everything is client-side and runs on
+    a 256×256 power-of-two tile.</p>
+    <p class="warn"><b>Performance is the honest cost.</b> A hand-written radix-2 FFT and log-polar search in
+    JavaScript is far slower than the Python toolkit's compiled libraries. Keep <code>rot+scale</code>
+    registration for short clips, and run deconvolution on demand (the button) rather than per frame. For
+    batch/offline work — full wavelet-MMSE denoising, tested Fourier-Mellin, and fast PCE — use the Python
+    package shipped alongside this file.</p>
+  </div>
+</div>
+
+<script>
+/* recon-core.js — validated numerical core for the browser build.
+   Implements the four corrected roadmap methods in vanilla JS:
+     1. Haar wavelet soft-threshold denoiser (PRNU residual)
+     2. FFT-based PCE over the full circular cross-correlation surface
+     3. log-polar (Fourier-Mellin) rotation/scale registration
+     4. estimated-PSF Richardson-Lucy deconvolution
+   Works on power-of-two square tiles (default 256). */
+(function (root) {
+"use strict";
+
+/* ----------------------------- 1-D radix-2 FFT ----------------------------- */
+function fft(re, im, inverse) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { const tr = re[i]; re[i] = re[j]; re[j] = tr;
+                 const ti = im[i]; im[i] = im[j]; im[j] = ti; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = (inverse ? 2 : -2) * Math.PI / len;
+    const wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cwr = 1, cwi = 0;
+      for (let k = 0; k < (len >> 1); k++) {
+        const a = i + k, b = a + (len >> 1);
+        const vr = re[b] * cwr - im[b] * cwi;
+        const vi = re[b] * cwi + im[b] * cwr;
+        re[b] = re[a] - vr; im[b] = im[a] - vi;
+        re[a] += vr;        im[a] += vi;
+        const ncwr = cwr * wr - cwi * wi;
+        cwi = cwr * wi + cwi * wr; cwr = ncwr;
+      }
+    }
+  }
+  if (inverse) for (let i = 0; i < n; i++) { re[i] /= n; im[i] /= n; }
+}
+
+function fft2(re, im, W, H, inverse) {
+  const rr = new Float64Array(W), ri = new Float64Array(W);
+  for (let y = 0; y < H; y++) {
+    const o = y * W;
+    for (let x = 0; x < W; x++) { rr[x] = re[o + x]; ri[x] = im[o + x]; }
+    fft(rr, ri, inverse);
+    for (let x = 0; x < W; x++) { re[o + x] = rr[x]; im[o + x] = ri[x]; }
+  }
+  const cr = new Float64Array(H), ci = new Float64Array(H);
+  for (let x = 0; x < W; x++) {
+    for (let y = 0; y < H; y++) { cr[y] = re[y * W + x]; ci[y] = im[y * W + x]; }
+    fft(cr, ci, inverse);
+    for (let y = 0; y < H; y++) { re[y * W + x] = cr[y]; im[y * W + x] = ci[y]; }
+  }
+}
+
+/* --------------------------------- helpers -------------------------------- */
+function mean(a) { let s = 0; for (let i = 0; i < a.length; i++) s += a[i]; return s / a.length; }
+function zeroMean(a) { const m = mean(a); const o = new Float64Array(a.length); for (let i = 0; i < a.length; i++) o[i] = a[i] - m; return o; }
+function nccZero(a, b) {
+  const A = zeroMean(a), B = zeroMean(b); let n = 0, da = 0, db = 0;
+  for (let i = 0; i < A.length; i++) { n += A[i] * B[i]; da += A[i] * A[i]; db += B[i] * B[i]; }
+  const d = Math.sqrt(da * db); return d < 1e-12 ? 0 : n / d;
+}
+
+/* -------------------- 2. FFT cross-correlation + PCE ---------------------- */
+function crosscorr2(a, b, W, H) {
+  const ar = zeroMean(a), ai = new Float64Array(W * H);
+  const br = zeroMean(b), bi = new Float64Array(W * H);
+  fft2(ar, ai, W, H, false); fft2(br, bi, W, H, false);
+  const cr = new Float64Array(W * H), ci = new Float64Array(W * H);
+  for (let i = 0; i < W * H; i++) {           // A * conj(B)
+    cr[i] = ar[i] * br[i] + ai[i] * bi[i];
+    ci[i] = ai[i] * br[i] - ar[i] * bi[i];
+  }
+  fft2(cr, ci, W, H, true);
+  return cr;
+}
+function pce(a, b, W, H) {
+  const C = crosscorr2(a, b, W, H), n = W * H;
+  let e = 0; for (let i = 0; i < n; i++) e += C[i] * C[i];
+  const norm = Math.sqrt(e / n) + 1e-30;
+  let pk = 0, pi = 0;
+  for (let i = 0; i < n; i++) { const v = C[i] / norm; C[i] = v; if (Math.abs(v) > Math.abs(pk)) { pk = v; pi = i; } }
+  const py = (pi / W) | 0, px = pi % W;
+  let energy = 0, cnt = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const dy = Math.min((y - py + H) % H, (py - y + H) % H);
+    const dx = Math.min((x - px + W) % W, (px - x + W) % W);
+    if (dy <= 1 && dx <= 1) continue;
+    energy += C[y * W + x] * C[y * W + x]; cnt++;
+  }
+  energy /= cnt;
+  return { pce: energy < 1e-30 ? 0 : pk * pk / energy * Math.sign(pk),
+           peak: [py, px], ncc: nccZero(a, b) };
+}
+
+/* --------------------- 1. Haar soft-threshold denoiser -------------------- */
+const S2 = Math.SQRT1_2;
+function haarFwd(a, W, H, w, h) {                 // one level on top-left w x h
+  const t = new Float64Array(w);
+  for (let y = 0; y < h; y++) {                   // rows
+    const o = y * W, half = w >> 1;
+    for (let i = 0; i < half; i++) { t[i] = (a[o + 2 * i] + a[o + 2 * i + 1]) * S2; t[half + i] = (a[o + 2 * i] - a[o + 2 * i + 1]) * S2; }
+    for (let i = 0; i < w; i++) a[o + i] = t[i];
+  }
+  const tc = new Float64Array(h);
+  for (let x = 0; x < w; x++) {                   // cols
+    const half = h >> 1;
+    for (let i = 0; i < half; i++) { tc[i] = (a[2 * i * W + x] + a[(2 * i + 1) * W + x]) * S2; tc[half + i] = (a[2 * i * W + x] - a[(2 * i + 1) * W + x]) * S2; }
+    for (let i = 0; i < h; i++) a[i * W + x] = tc[i];
+  }
+}
+function haarInv(a, W, H, w, h) {
+  const tc = new Float64Array(h);
+  for (let x = 0; x < w; x++) {
+    const half = h >> 1;
+    for (let i = 0; i < half; i++) { const s = a[i * W + x], d = a[(half + i) * W + x]; tc[2 * i] = (s + d) * S2; tc[2 * i + 1] = (s - d) * S2; }
+    for (let i = 0; i < h; i++) a[i * W + x] = tc[i];
+  }
+  const t = new Float64Array(w);
+  for (let y = 0; y < h; y++) {
+    const o = y * W, half = w >> 1;
+    for (let i = 0; i < half; i++) { const s = a[o + i], d = a[o + half + i]; t[2 * i] = (s + d) * S2; t[2 * i + 1] = (s - d) * S2; }
+    for (let i = 0; i < w; i++) a[o + i] = t[i];
+  }
+}
+function softThresholdDetails(a, W, H, w, h, thr) { // shrink LH,HL,HH of this level
+  const hw = w >> 1, hh = h >> 1;
+  const soft = v => { const s = Math.sign(v), m = Math.abs(v) - thr; return m > 0 ? s * m : 0; };
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (x < hw && y < hh) continue;                // LL — keep
+    a[y * W + x] = soft(a[y * W + x]);
+  }
+}
+function waveletDenoise(img, W, H, sigma, levels) {
+  const a = Float64Array.from(img);
+  let w = W, h = H;
+  const sizes = [];
+  for (let l = 0; l < levels && w > 1 && h > 1; l++) { haarFwd(a, W, H, w, h); sizes.push([w, h]); w >>= 1; h >>= 1; }
+  // universal-ish threshold from noise sigma
+  const thr = sigma * Math.sqrt(2 * Math.log(W * H));
+  for (let l = sizes.length - 1; l >= 0; l--) { const [cw, ch] = sizes[l]; softThresholdDetails(a, W, H, cw, ch, thr); }
+  for (let l = sizes.length - 1; l >= 0; l--) { const [cw, ch] = sizes[l]; haarInv(a, W, H, cw, ch); }
+  return a;
+}
+function noiseResidual(img, W, H, sigma, levels) {
+  const den = waveletDenoise(img, W, H, sigma || 3, levels || 4);
+  const r = new Float64Array(W * H);
+  for (let i = 0; i < W * H; i++) r[i] = img[i] - den[i];
+  return r;
+}
+
+/* ----------------------------- PRNU fingerprint --------------------------- */
+function zeroMeanRC(K, W, H) {
+  for (let y = 0; y < H; y++) { let m = 0; for (let x = 0; x < W; x++) m += K[y * W + x]; m /= W; for (let x = 0; x < W; x++) K[y * W + x] -= m; }
+  for (let x = 0; x < W; x++) { let m = 0; for (let y = 0; y < H; y++) m += K[y * W + x]; m /= H; for (let y = 0; y < H; y++) K[y * W + x] -= m; }
+  return K;
+}
+function fingerprintAccumulate(state, img, W, H, sigma, levels) {
+  if (!state) state = { num: new Float64Array(W * H), den: new Float64Array(W * H), n: 0, W, H };
+  const w = noiseResidual(img, W, H, sigma, levels);
+  for (let i = 0; i < W * H; i++) { state.num[i] += w[i] * img[i]; state.den[i] += img[i] * img[i]; }
+  state.n++;
+  return state;
+}
+function fingerprintFinalize(state) {
+  const { num, den, W, H } = state, K = new Float64Array(W * H);
+  for (let i = 0; i < W * H; i++) K[i] = num[i] / (den[i] + 1);
+  return zeroMeanRC(K, W, H);
+}
+function verify(img, K, W, H, sigma, levels) {
+  const w = noiseResidual(img, W, H, sigma, levels);
+  const pred = new Float64Array(W * H);
+  for (let i = 0; i < W * H; i++) pred[i] = img[i] * K[i];
+  return pce(w, pred, W, H);
+}
+
+/* --------------- 3. log-polar (Fourier-Mellin) registration --------------- */
+function fftMag(img, W, H) {
+  const re = Float64Array.from(img), im = new Float64Array(W * H);
+  // Hann window + RC high-pass emphasis applied after shift
+  for (let y = 0; y < H; y++) { const wy = 0.5 - 0.5 * Math.cos(2 * Math.PI * y / (H - 1)); for (let x = 0; x < W; x++) { const wx = 0.5 - 0.5 * Math.cos(2 * Math.PI * x / (W - 1)); re[y * W + x] *= wy * wx; } }
+  fft2(re, im, W, H, false);
+  const mag = new Float64Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {   // fftshift + |.|
+    const sy = (y + (H >> 1)) % H, sx = (x + (W >> 1)) % W;
+    const i = sy * W + sx;
+    let m = Math.hypot(re[i], im[i]);
+    const u = y / (H - 1) - 0.5, v = x / (W - 1) - 0.5;         // RC high-pass
+    const X = Math.cos(Math.PI * u) * Math.cos(Math.PI * v);
+    mag[y * W + x] = m * (1 - X) * (2 - X);
+  }
+  return mag;
+}
+function logPolar(mag, W, H, nAng, nRad) {
+  const cx = W / 2, cy = H / 2, maxR = Math.min(W, H) / 2;
+  const klog = Math.log(maxR) / nRad;
+  const out = new Float64Array(nAng * nRad);
+  for (let a = 0; a < nAng; a++) {
+    const th = Math.PI * a / nAng;               // 0..pi (mag symmetric)
+    const ct = Math.cos(th), st = Math.sin(th);
+    for (let r = 0; r < nRad; r++) {
+      const rad = Math.exp(r * klog);
+      const fx = cx + rad * ct, fy = cy + rad * st;
+      const x0 = Math.floor(fx), y0 = Math.floor(fy);
+      if (x0 < 0 || y0 < 0 || x0 >= W - 1 || y0 >= H - 1) continue;
+      const dx = fx - x0, dy = fy - y0;
+      const v = mag[y0 * W + x0] * (1 - dx) * (1 - dy) + mag[y0 * W + x0 + 1] * dx * (1 - dy)
+              + mag[(y0 + 1) * W + x0] * (1 - dx) * dy + mag[(y0 + 1) * W + x0 + 1] * dx * dy;
+      out[a * nRad + r] = v;
+    }
+  }
+  return { lp: out, klog, maxR };
+}
+function phaseCorr(a, b, W, H) {                 // returns {dy,dx} integer + parabolic
+  const ar = Float64Array.from(a), ai = new Float64Array(W * H);
+  const br = Float64Array.from(b), bi = new Float64Array(W * H);
+  fft2(ar, ai, W, H, false); fft2(br, bi, W, H, false);
+  const cr = new Float64Array(W * H), ci = new Float64Array(W * H);
+  for (let i = 0; i < W * H; i++) {
+    const rr = ar[i] * br[i] + ai[i] * bi[i], ii = ai[i] * br[i] - ar[i] * bi[i];
+    const mag = Math.hypot(rr, ii) + 1e-12;
+    cr[i] = rr / mag; ci[i] = ii / mag;          // cross-power spectrum (phase only)
+  }
+  fft2(cr, ci, W, H, true);
+  let pk = -1e30, pi = 0;
+  for (let i = 0; i < W * H; i++) if (cr[i] > pk) { pk = cr[i]; pi = i; }
+  let py = (pi / W) | 0, px = pi % W;
+  const at = (y, x) => cr[((y + H) % H) * W + ((x + W) % W)];
+  const spx = parab(at(py, px - 1), pk, at(py, px + 1));
+  const spy = parab(at(py - 1, px), pk, at(py + 1, px));
+  if (py > H / 2) py -= H; if (px > W / 2) px -= W;
+  return { dy: py + spy, dx: px + spx, peak: pk };
+}
+function parab(l, c, r) { const d = l - 2 * c + r; return Math.abs(d) < 1e-9 ? 0 : 0.5 * (l - r) / d; }
+
+function registerRST(ref, mov, W, H) {
+  const nAng = 256, nRad = W;                     // both power-of-two for the FFT
+  const lpR = logPolar(fftMag(ref, W, H), W, H, nAng, nRad);
+  const lpM = logPolar(fftMag(mov, W, H), W, H, nAng, nRad);
+  const pc = phaseCorr(lpR.lp, lpM.lp, nRad, nAng);   // array: nAng rows x nRad cols
+  const angMag = (180 / nAng) * pc.dy;            // degrees (magnitude, mod 180)
+  const scaleMag = Math.exp(pc.dx * lpR.klog);
+  // resolve rotation sign / 180-deg and scale-direction ambiguity by best NCC
+  let best = null;
+  const angles = [angMag, -angMag, angMag + 180, -angMag + 180];
+  const scales = [scaleMag, 1 / scaleMag];
+  for (const a of angles) for (const sc of scales) {
+    const corr = rotateScale(mov, W, H, a, sc);
+    const t = phaseCorr(ref, corr, W, H);
+    const aligned = shiftImg(corr, W, H, t.dy, t.dx);
+    const s = nccZero(ref, aligned);
+    if (!best || s > best.s) best = { s, angle: a, scale: sc, dy: t.dy, dx: t.dx };
+  }
+  const angle = ((best.angle + 180) % 360) - 180;
+  return { angle, scale: best.scale, dy: best.dy, dx: best.dx, score: best.s };
+}
+function rotateScale(img, W, H, deg, scale) {     // bilinear, about center
+  const out = new Float64Array(W * H), cx = W / 2, cy = H / 2;
+  const rad = -deg * Math.PI / 180, c = Math.cos(rad) / scale, s = Math.sin(rad) / scale;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const xr = x - cx, yr = y - cy;
+    const sx = cx + (c * xr - s * yr), sy = cy + (s * xr + c * yr);
+    const x0 = Math.floor(sx), y0 = Math.floor(sy);
+    if (x0 < 0 || y0 < 0 || x0 >= W - 1 || y0 >= H - 1) continue;
+    const dx = sx - x0, dy = sy - y0;
+    out[y * W + x] = img[y0 * W + x0] * (1 - dx) * (1 - dy) + img[y0 * W + x0 + 1] * dx * (1 - dy)
+                   + img[(y0 + 1) * W + x0] * (1 - dx) * dy + img[(y0 + 1) * W + x0 + 1] * dx * dy;
+  }
+  return out;
+}
+function shiftImg(img, W, H, dy, dx) {
+  const out = new Float64Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const sy = y - dy, sx = x - dx;
+    const y0 = Math.floor(sy), x0 = Math.floor(sx);
+    let yy0 = y0 < 0 ? 0 : y0 >= H - 1 ? H - 2 : y0;
+    let xx0 = x0 < 0 ? 0 : x0 >= W - 1 ? W - 2 : x0;
+    const fy = sy - yy0, fx = sx - xx0;
+    out[y * W + x] = img[yy0 * W + xx0] * (1 - fx) * (1 - fy) + img[yy0 * W + xx0 + 1] * fx * (1 - fy)
+                   + img[(yy0 + 1) * W + xx0] * (1 - fx) * fy + img[(yy0 + 1) * W + xx0 + 1] * fx * fy;
+  }
+  return out;
+}
+
+/* ------------- 4. estimated-PSF Richardson-Lucy deconvolution ------------- */
+function conv2(img, W, H, psf, pw, ph) {
+  const out = new Float64Array(W * H), rx = pw >> 1, ry = ph >> 1;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let s = 0;
+    for (let ky = 0; ky < ph; ky++) for (let kx = 0; kx < pw; kx++) {
+      let iy = y + ky - ry, ix = x + kx - rx;
+      iy = iy < 0 ? 0 : iy >= H ? H - 1 : iy; ix = ix < 0 ? 0 : ix >= W ? W - 1 : ix;
+      s += img[iy * W + ix] * psf[ky * pw + kx];
+    }
+    out[y * W + x] = s;
+  }
+  return out;
+}
+function estimatePSF(eye, W, H, size) {           // from brightest catchlight blob
+  if ((size & 1) === 0) size++;
+  const r = size >> 1;
+  let pk = -1e30, pi = 0;
+  for (let i = 0; i < W * H; i++) if (eye[i] > pk) { pk = eye[i]; pi = i; }
+  let y0 = Math.min(Math.max((pi / W) | 0, r), H - r - 1);
+  let x0 = Math.min(Math.max(pi % W, r), W - r - 1);
+  const patch = new Float64Array(size * size); let bg = 1e30;
+  for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) { const v = eye[(y0 + y) * W + (x0 + x)]; if (v < bg) bg = v; }
+  let s = 0;
+  for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) { const v = Math.max(0, eye[(y0 + y) * W + (x0 + x)] - bg); patch[(y + r) * size + (x + r)] = v; s += v; }
+  if (s < 1e-6) { const g = gaussPSF(Math.max(1, size / 6)); return g; }
+  for (let i = 0; i < patch.length; i++) patch[i] /= s;
+  patch.size = size; return patch;
+}
+function gaussPSF(sigma) {
+  const r = Math.max(1, Math.round(sigma * 3)), size = 2 * r + 1, k = new Float64Array(size * size); let s = 0;
+  for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) { const v = Math.exp(-(x * x + y * y) / (2 * sigma * sigma)); k[(y + r) * size + (x + r)] = v; s += v; }
+  for (let i = 0; i < k.length; i++) k[i] /= s; k.size = size; return k;
+}
+function richardsonLucy(obs, W, H, psf, iters) {   // obs in [0,1]
+  const size = psf.size, flip = new Float64Array(psf.length);
+  for (let i = 0; i < psf.length; i++) flip[i] = psf[psf.length - 1 - i];
+  let u = Float64Array.from(obs);
+  for (let t = 0; t < iters; t++) {
+    const cu = conv2(u, W, H, psf, size, size);
+    const ratio = new Float64Array(W * H);
+    for (let i = 0; i < W * H; i++) ratio[i] = obs[i] / (cu[i] + 1e-4);
+    const corr = conv2(ratio, W, H, flip, size, size);
+    for (let i = 0; i < W * H; i++) { u[i] *= corr[i]; if (u[i] > 1) u[i] = 1; else if (u[i] < 0) u[i] = 0; }
+  }
+  return u;
+}
+
+const API = { fft, fft2, nccZero, crosscorr2, pce, waveletDenoise, noiseResidual,
+  zeroMeanRC, fingerprintAccumulate, fingerprintFinalize, verify,
+  registerRST, rotateScale, shiftImg, phaseCorr, estimatePSF, gaussPSF, richardsonLucy };
+if (typeof module !== "undefined" && module.exports) module.exports = API;
+else root.ReconCore = API;
+})(typeof self !== "undefined" ? self : this);
+
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+<script>
+"use strict";
+const RC = window.ReconCore;
+const TILE = 256;
+const R_EYE=[33,7,163,144,145,153,154,155,133,173,157,158,159,160,161,246,469,470,471,472,468];
+const L_EYE=[362,382,381,380,374,373,390,249,263,466,388,387,386,385,384,398,474,475,476,477,473];
+
+const $=id=>document.getElementById(id);
+const S={
+  mode:'recon', region:'rEye', reg:'translation',
+  stack:false, auto:true, contrast:1, cmp:1,
+  pad:0.40, rlIter:15, psfMode:'catchlight', psfSize:15,
+  running:false, srcKind:null, landmarks:null, roiRect:null, dragging:false, dragStart:null,
+  accum:null, accN:0, refTile:null, fpsT:performance.now(), fpsC:0,
+  lastProcessed:null, lastRaw:null,
+  // sensor
+  sview:'residual', sigma:3.0, levels:4, prState:null, K:null, ncc:0, pce:0, lastResidual:null
+};
+
+const srcCanvas=$('srcCanvas'),srcCtx=srcCanvas.getContext('2d',{willReadFrequently:true});
+const outCanvas=$('outCanvas'),outCtx=outCanvas.getContext('2d',{willReadFrequently:true});
+const tile=document.createElement('canvas');tile.width=tile.height=TILE;
+const tileCtx=tile.getContext('2d',{willReadFrequently:true});
+let video=null,faceMesh=null,camera=null,rafId=null,imageEl=null;
+
+/* ---- tabs ---- */
+$('tabRecon').onclick=()=>setMode('recon');
+$('tabSensor').onclick=()=>setMode('sensor');
+function setMode(m){S.mode=m;
+  $('tabRecon').classList.toggle('active',m==='recon');$('tabSensor').classList.toggle('active',m==='sensor');
+  $('reconCtl').classList.toggle('hide',m!=='recon');$('sensorCtl').classList.toggle('hide',m==='recon');
+  $('outTitle').textContent=m==='recon'?'02 · reconstruction':'02 · sensor view';}
+
+function seg(sel,attr,cb){document.querySelectorAll(sel).forEach(b=>b.onclick=()=>{
+  document.querySelectorAll(sel).forEach(x=>x.classList.remove('active'));b.classList.add('active');cb(b.dataset[attr]);});}
+seg('[data-region]','region',v=>{S.region=v;resetStack();$('srcHint').textContent=v==='roi'?'drag to set ROI':'region: '+v;});
+seg('[data-reg]','reg',v=>{S.reg=v;resetStack();});
+seg('[data-psf]','psf',v=>{S.psfMode=v;});
+seg('[data-sview]','sview',v=>{S.sview=v;});
+function toggle(id,key,after){const el=$(id);el.classList.toggle('on',S[key]);el.onclick=()=>{S[key]=!S[key];el.classList.toggle('on',S[key]);if(after)after();};}
+toggle('stackTog','stack',()=>{$('stackState').textContent=S.stack?'on':'off';resetStack();});
+toggle('autoTog','auto');
+function slider(id,out,key,fmt,map){const el=$(id),o=$(out);const u=()=>{const r=+el.value;S[key]=map?map(r):r;o.textContent=fmt(r);};el.oninput=u;u();}
+slider('pad','padOut','pad',v=>v+'%',v=>v/100);
+slider('contrast','coOut','contrast',v=>(v/100).toFixed(2)+'×',v=>v/100);
+slider('cmp','cmpOut','cmp',v=>v+'%',v=>v/100);
+slider('rlIter','rlIterOut','rlIter',v=>''+v);
+slider('psfSize','psfOut','psfSize',v=>''+v);
+slider('sigma','sigOut','sigma',v=>(v/10).toFixed(1),v=>v/10);
+slider('levels','lvlOut','levels',v=>''+v);
+$('resetStack').onclick=resetStack;
+function resetStack(){S.accum=null;S.accN=0;S.refTile=null;S.lastProcessed=null;$('framesOut').textContent='0';$('alignOut').textContent='—';}
+
+/* ---- sensor buttons ---- */
+$('enrollBtn').onclick=()=>{S.enrolling=!S.enrolling;$('enrollBtn').textContent=S.enrolling?'● enrolling…':'● enroll fingerprint';$('enrollBtn').classList.toggle('stop',S.enrolling);};
+$('verifyBtn').onclick=()=>{if(!S.K){$('verdict').textContent='enroll first';return;}runVerify();};
+$('resetPrnu').onclick=()=>{S.prState=null;S.K=null;S.enrolling=false;$('enrollN').textContent='0';
+  $('enrollBtn').textContent='● enroll fingerprint';$('enrollBtn').classList.remove('stop');
+  gauge(0,0);$('verdict').className='verdict';$('verdict').textContent='awaiting verify';};
+
+/* ---- deconvolve ---- */
+$('deconvBtn').onclick=()=>{if(!S.accum){return;}deconvolveStack();};
+
+/* ---- source ---- */
+$('startBtn').onclick=async()=>{if(S.running&&S.srcKind==='cam'){stopAll();return;}stopAll();
+  try{video=document.createElement('video');video.muted=true;video.playsInline=true;
+    const st=await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720},audio:false});
+    video.srcObject=st;await video.play();S.srcKind='cam';setLive(true,'▶ stop webcam','cam');
+    await ensureFaceMesh();startPump();loop();
+  }catch(e){$('srcHint').textContent='camera unavailable — '+e.message;}};
+$('loadVideo').onclick=()=>$('videoFile').click();$('loadImage').onclick=()=>$('imageFile').click();
+$('videoFile').onchange=e=>{const f=e.target.files[0];if(!f)return;stopAll();
+  video=document.createElement('video');video.src=URL.createObjectURL(f);video.loop=true;video.muted=true;video.playsInline=true;
+  video.onloadeddata=async()=>{await video.play();S.srcKind='video';setLive(true,'▶ start webcam','video');await ensureFaceMesh();startPump();loop();};};
+$('imageFile').onchange=e=>{const f=e.target.files[0];if(!f)return;stopAll();
+  imageEl=new Image();imageEl.onload=async()=>{S.srcKind='image';setLive(true,'▶ start webcam','image');await ensureFaceMesh();loop();};imageEl.src=URL.createObjectURL(f);};
+function setLive(on,t,k){S.running=on;const s=$('liveStamp'),b=$('startBtn');s.classList.toggle('on',on);
+  s.innerHTML='<span class="dot"></span>'+(on?(k==='cam'?'live capture':'playback'):'standby');
+  $('srcState').textContent=on?k:'off';b.textContent=t;b.classList.toggle('stop',on&&k==='cam');}
+function stopAll(){if(rafId)cancelAnimationFrame(rafId);rafId=null;if(camera){try{camera.stop()}catch(e){}camera=null;}
+  if(video&&video.srcObject)video.srcObject.getTracks().forEach(t=>t.stop());
+  video=null;imageEl=null;S.landmarks=null;resetStack();setLive(false,'▶ start webcam',null);
+  $('srcMeta').textContent='no signal';$('outMeta').textContent='idle';}
+async function ensureFaceMesh(){if(faceMesh)return;
+  faceMesh=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
+  faceMesh.setOptions({maxNumFaces:1,refineLandmarks:true,minDetectionConfidence:.5,minTrackingConfidence:.5});
+  faceMesh.onResults(r=>{S.landmarks=(r.multiFaceLandmarks&&r.multiFaceLandmarks[0])||null;});}
+function startPump(){camera=new Camera(video,{onFrame:async()=>{
+  if(S.mode==='recon'&&S.region!=='roi'&&S.region!=='full')await faceMesh.send({image:video});},width:1280,height:720});camera.start();}
+
+/* ---- ROI ---- */
+function frameSize(){if(S.srcKind==='image')return[imageEl.naturalWidth,imageEl.naturalHeight];return[video.videoWidth||640,video.videoHeight||480];}
+function lmBox(idx,W,H){let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;for(const i of idx){const p=S.landmarks[i];if(!p)continue;
+  x0=Math.min(x0,p.x);y0=Math.min(y0,p.y);x1=Math.max(x1,p.x);y1=Math.max(y1,p.y);}return{x0:x0*W,y0:y0*H,x1:x1*W,y1:y1*H};}
+function padBox(b,W,H){let w=b.x1-b.x0,h=b.y1-b.y0,px=w*S.pad,py=h*S.pad;let x=b.x0-px,y=b.y0-py;w+=2*px;h+=2*py;
+  x=Math.max(0,x);y=Math.max(0,y);w=Math.min(W-x,w);h=Math.min(H-y,h);return{x,y,w,h};}
+function computeROI(W,H){if(S.region==='full')return{x:0,y:0,w:W,h:H};
+  if(S.region==='roi')return S.roiRect||{x:W*.35,y:H*.35,w:W*.3,h:H*.3};
+  if(!S.landmarks)return null;
+  if(S.region==='rEye')return padBox(lmBox(R_EYE,W,H),W,H);
+  if(S.region==='lEye')return padBox(lmBox(L_EYE,W,H),W,H);
+  const b=lmBox([...R_EYE,...L_EYE],W,H);
+  if(S.region==='glasses'){const cx=(b.x0+b.x1)/2,cy=(b.y0+b.y1)/2,w=(b.x1-b.x0)*1.35,h=(b.y1-b.y0)*2.2;return padBox({x0:cx-w/2,y0:cy-h/2,x1:cx+w/2,y1:cy+h/2},W,H);}
+  return padBox(b,W,H);}
+
+/* ---- helpers: canvas <-> float luma tile ---- */
+function roiToLuma(srcImg,roi){tileCtx.imageSmoothingEnabled=true;tileCtx.imageSmoothingQuality='high';
+  tileCtx.drawImage(srcImg,roi.x,roi.y,roi.w,roi.h,0,0,TILE,TILE);
+  const d=tileCtx.getImageData(0,0,TILE,TILE).data,L=new Float64Array(TILE*TILE);
+  for(let i=0,j=0;i<d.length;i+=4,j++)L[j]=0.2126*d[i]+0.7152*d[i+1]+0.0722*d[i+2];return L;}
+function frameToLuma(srcImg){tileCtx.imageSmoothingEnabled=true;tileCtx.drawImage(srcImg,0,0,TILE,TILE);
+  const d=tileCtx.getImageData(0,0,TILE,TILE).data,L=new Float64Array(TILE*TILE);
+  for(let i=0,j=0;i<d.length;i+=4,j++)L[j]=0.2126*d[i]+0.7152*d[i+1]+0.0722*d[i+2];return L;}
+function stddev(a){let m=0;for(let i=0;i<a.length;i++)m+=a[i];m/=a.length;let v=0;for(let i=0;i<a.length;i++){const d=a[i]-m;v+=d*d;}return Math.sqrt(v/a.length);}
+
+/* ---- main loop ---- */
+function loop(){const[W,H]=frameSize();if(!W){rafId=requestAnimationFrame(loop);return;}
+  srcCanvas.width=W;srcCanvas.height=H;const srcImg=S.srcKind==='image'?imageEl:video;
+  srcCtx.drawImage(srcImg,0,0,W,H);$('srcMeta').textContent=W+'×'+H;
+  if(S.mode==='recon'){
+    if(S.srcKind==='image'&&S.region!=='roi'&&S.region!=='full'&&!S.landmarks)faceMesh.send({image:imageEl});
+    const roi=computeROI(W,H);drawReticle(W,H,roi);
+    $('tFace').textContent=S.landmarks?'locked':(S.region==='roi'||S.region==='full'?'n/a':'searching');
+    if(roi&&roi.w>2&&roi.h>2)processRecon(roi,srcImg);else{blank();$('outMeta').textContent='no roi';}
+  }else{processSensorLive(srcImg);}
+  S.fpsC++;const now=performance.now();if(now-S.fpsT>500){$('fpsStamp').textContent=Math.round(S.fpsC*1000/(now-S.fpsT))+' fps';S.fpsT=now;S.fpsC=0;}
+  rafId=requestAnimationFrame(loop);}
+function blank(){outCtx.fillStyle='#0a0f16';outCtx.fillRect(0,0,outCanvas.width,outCanvas.height);}
+
+/* ---- RECON pipeline (uses ReconCore) ---- */
+function processRecon(roi,srcImg){
+  const L=roiToLuma(srcImg,roi);              // 0..255 float tile
+  S.lastRaw=L;
+  $('tRoi').textContent=Math.round(roi.w)+'×'+Math.round(roi.h)+' px';
+  $('tNoise').textContent=stddev(L).toFixed(1);
+  if(S.stack){
+    let cur=L;
+    if(!S.accum){S.accum=Float64Array.from(L);S.accN=1;S.refTile=Float64Array.from(L);$('alignOut').textContent='ref';}
+    else{
+      let aligned=cur,al='—';
+      if(S.reg==='translation'){const t=RC.phaseCorr(S.refTile,cur,TILE,TILE);aligned=RC.shiftImg(cur,TILE,TILE,t.dy,t.dx);al=t.dy.toFixed(1)+','+t.dx.toFixed(1)+'px';}
+      else if(S.reg==='rst'){const r=RC.registerRST(S.refTile,cur,TILE,TILE);const rot=RC.rotateScale(cur,TILE,TILE,r.angle,r.scale);aligned=RC.shiftImg(rot,TILE,TILE,r.dy,r.dx);al=r.angle.toFixed(1)+'° ×'+r.scale.toFixed(3);}
+      for(let i=0;i<TILE*TILE;i++)S.accum[i]+=aligned[i];S.accN++;$('alignOut').textContent=al;
+    }
+    $('framesOut').textContent=S.accN;
+    const avg=new Float64Array(TILE*TILE);for(let i=0;i<TILE*TILE;i++)avg[i]=S.accum[i]/S.accN;
+    S.lastProcessed=avg;presentRecon(avg);
+  }else{S.lastProcessed=L;presentRecon(L);}
+}
+function deconvolveStack(){
+  if(!S.lastProcessed)return;$('busy').classList.add('on');
+  setTimeout(()=>{
+    const base=S.lastProcessed;const norm=new Float64Array(TILE*TILE);
+    let mx=1;for(let i=0;i<base.length;i++)mx=Math.max(mx,base[i]);
+    for(let i=0;i<base.length;i++)norm[i]=Math.min(1,Math.max(1e-6,base[i]/mx));
+    const psf=S.psfMode==='catchlight'?RC.estimatePSF(norm,TILE,TILE,S.psfSize):RC.gaussPSF(S.psfSize/6);
+    const u=RC.richardsonLucy(norm,TILE,TILE,psf,S.rlIter);
+    const out=new Float64Array(TILE*TILE);for(let i=0;i<u.length;i++)out[i]=u[i]*mx;
+    S.lastProcessed=out;presentRecon(out);$('busy').classList.remove('on');
+    $('outMeta').textContent='deconvolved · '+S.rlIter+'it';
+  },30);
+}
+function presentRecon(arr){
+  let a=Float64Array.from(arr);
+  if(S.auto){const s=arr.slice().sort();const lo=s[(s.length*0.01)|0],hi=s[(s.length*0.99)|0];const sc=hi>lo?255/(hi-lo):1;
+    for(let i=0;i<a.length;i++)a[i]=Math.min(255,Math.max(0,(a[i]-lo)*sc));}
+  const con=S.contrast;for(let i=0;i<a.length;i++)a[i]=Math.min(255,Math.max(0,(a[i]-128)*con+128));
+  if(S.cmp<1&&S.lastRaw){for(let i=0;i<a.length;i++)a[i]=S.lastRaw[i]*(1-S.cmp)+a[i]*S.cmp;}
+  drawTile(a,S.stack?'int·'+S.accN:'single');
+}
+function drawTile(lumaArr,tag){
+  const img=tileCtx.createImageData(TILE,TILE);
+  for(let i=0,j=0;i<lumaArr.length;i++,j+=4){const v=Math.min(255,Math.max(0,lumaArr[i]));img.data[j]=img.data[j+1]=img.data[j+2]=v;img.data[j+3]=255;}
+  tileCtx.putImageData(img,0,0);
+  outCtx.imageSmoothingEnabled=false;outCtx.fillStyle='#0a0f16';outCtx.fillRect(0,0,outCanvas.width,outCanvas.height);
+  const sc=Math.min(outCanvas.width/TILE,outCanvas.height/TILE),d=TILE*sc,dx=(outCanvas.width-d)/2,dy=(outCanvas.height-d)/2;
+  outCtx.drawImage(tile,0,0,TILE,TILE,dx,dy,d,d);outCtx.strokeStyle='#1e2836';outCtx.strokeRect(dx+.5,dy+.5,d-1,d-1);
+  if(tag)$('outMeta').textContent=tag;
+}
+
+/* ---- SENSOR (uses ReconCore) ---- */
+function processSensorLive(srcImg){
+  const L=frameToLuma(srcImg);
+  if(S.enrolling){S.prState=RC.fingerprintAccumulate(S.prState,L,TILE,TILE,S.sigma,S.levels);
+    S.K=RC.fingerprintFinalize(S.prState);$('enrollN').textContent=S.prState.n;}
+  // live residual view
+  S.lastResidual=RC.noiseResidual(L,TILE,TILE,S.sigma,S.levels);
+  const arr=(S.sview==='print'&&S.K)?S.K:S.lastResidual;
+  drawSigned(arr,(S.sview==='print'?'fingerprint K̂':'residual W'));
+}
+function runVerify(){const srcImg=S.srcKind==='image'?imageEl:video;const L=frameToLuma(srcImg);
+  const r=RC.verify(L,S.K,TILE,TILE,S.sigma,S.levels);S.ncc=r.ncc;S.pce=r.pce;gauge(r.ncc,r.pce);verdict(r.pce);}
+function drawSigned(arr,tag){let mn=1e9,mx=-1e9;for(let i=0;i<arr.length;i++){if(arr[i]<mn)mn=arr[i];if(arr[i]>mx)mx=arr[i];}
+  const sc=mx>mn?255/(mx-mn):1;const img=tileCtx.createImageData(TILE,TILE);
+  for(let i=0,j=0;i<arr.length;i++,j+=4){const v=(arr[i]-mn)*sc;img.data[j]=img.data[j+1]=img.data[j+2]=v;img.data[j+3]=255;}
+  tileCtx.putImageData(img,0,0);
+  outCtx.imageSmoothingEnabled=false;outCtx.fillStyle='#0a0f16';outCtx.fillRect(0,0,outCanvas.width,outCanvas.height);
+  const s=Math.min(outCanvas.width/TILE,outCanvas.height/TILE),d=TILE*s,dx=(outCanvas.width-d)/2,dy=(outCanvas.height-d)/2;
+  outCtx.drawImage(tile,0,0,TILE,TILE,dx,dy,d,d);outCtx.strokeStyle='#1e2836';outCtx.strokeRect(dx+.5,dy+.5,d-1,d-1);
+  $('outMeta').textContent=tag+' 256×256';}
+function gauge(c0,pce){$('nccVal').textContent=c0.toFixed(4);$('pceVal').textContent=pce.toFixed(1);
+  $('nccBar').style.width=Math.min(100,Math.abs(c0)/0.06*100)+'%';
+  $('pceBar').style.width=Math.min(100,Math.abs(pce)/80*100)+'%';
+  $('pceBar').style.background=pce>50?'var(--signal)':pce>15?'var(--signal-dim)':'var(--line-2)';}
+function verdict(pce){const v=$('verdict');if(pce>50){v.className='verdict match';v.textContent='same sensor · likely';}
+  else if(pce>15){v.className='verdict';v.textContent='weak / inconclusive';}else{v.className='verdict no';v.textContent='no match';}}
+
+/* ---- reticle + manual ROI ---- */
+function drawReticle(W,H,roi){if(!roi)return;srcCtx.save();srcCtx.fillStyle='rgba(8,11,17,0.55)';
+  srcCtx.beginPath();srcCtx.rect(0,0,W,H);srcCtx.rect(roi.x,roi.y,roi.w,roi.h);srcCtx.fill('evenodd');
+  srcCtx.strokeStyle=S.region==='roi'?'#ffb454':'#54e6c1';srcCtx.lineWidth=Math.max(1.5,W/500);srcCtx.strokeRect(roi.x,roi.y,roi.w,roi.h);
+  const t=Math.min(roi.w,roi.h)*.18;srcCtx.beginPath();
+  for(const[cx,cy,sx,sy]of[[roi.x,roi.y,1,1],[roi.x+roi.w,roi.y,-1,1],[roi.x,roi.y+roi.h,1,-1],[roi.x+roi.w,roi.y+roi.h,-1,-1]]){srcCtx.moveTo(cx,cy);srcCtx.lineTo(cx+sx*t,cy);srcCtx.moveTo(cx,cy);srcCtx.lineTo(cx,cy+sy*t);}srcCtx.stroke();srcCtx.restore();}
+function cxy(e){const r=srcCanvas.getBoundingClientRect(),sx=srcCanvas.width/r.width,sy=srcCanvas.height/r.height,p=e.touches?e.touches[0]:e;return[(p.clientX-r.left)*sx,(p.clientY-r.top)*sy];}
+srcCanvas.addEventListener('mousedown',e=>{if(S.mode!=='recon'||S.region!=='roi')return;S.dragging=true;S.dragStart=cxy(e);e.preventDefault();});
+srcCanvas.addEventListener('mousemove',e=>{if(!S.dragging)return;const[x,y]=cxy(e),[x0,y0]=S.dragStart;S.roiRect={x:Math.min(x,x0),y:Math.min(y,y0),w:Math.abs(x-x0),h:Math.abs(y-y0)};e.preventDefault();});
+window.addEventListener('mouseup',()=>{if(S.dragging){S.dragging=false;resetStack();}});
+
+/* ---- snapshots ---- */
+$('snap').onclick=dl;$('snap2').onclick=dl;
+function dl(){const a=document.createElement('a');a.download='recon_'+Date.now()+'.png';a.href=outCanvas.toDataURL('image/png');a.click();}
+
+blank();srcCtx.fillStyle='#0a0f16';srcCtx.fillRect(0,0,srcCanvas.width,srcCanvas.height);
+
+</script>
+</body>
+</html>

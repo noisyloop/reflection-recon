@@ -1,147 +1,198 @@
-# reflection-recon
+# recon-forensics
 
-A client-side forensic imaging bench for two related research problems:
+A research toolkit for two related imaging problems, in two forms:
 
-1. **Reflection reconstruction** — isolating and enhancing what's reflected in a subject's eyes, glasses, or any specular surface in a camera feed.
-2. **Sensor forensics (PRNU)** — estimating a camera's photo-response non-uniformity fingerprint and testing whether an image came from it.
+- **`recon/`** — a Python offline toolkit (`numpy` / `scipy` / `scikit-image` / `PyWavelets` / `mediapipe`). The rigorous, reproducible bench.
+- **`web/`** — a single self-contained HTML build with a hand-written, node-validated numerical core. The live, zero-install demo.
 
-Everything runs in the browser. No frame ever leaves the tab — no server, no upload, no network round-trip for the imagery.
+Both implement the same corrected methods:
 
-> **Scope.** This is a teaching and research instrument for understanding how reflection recovery and sensor fingerprinting work, and for demonstrating the privacy leakage they expose. It is deliberately honest about its limits (see [Limitations](#limitations)). It is not a courtroom pipeline and does not claim to be.
+1. **Wavelet denoiser** for the PRNU residual (Python: wavelet-MMSE / Mihcak; Web: Haar soft-threshold) — replaces the Gaussian high-pass of the earlier demo.
+2. **FFT-based PCE** over the full 2-D circular cross-correlation surface — not a decoy-shift approximation.
+3. **Log-polar (Fourier–Mellin) registration** for rotation + scale — not translation only.
+4. **Estimated corneal PSF** (from the eye's catchlight) driving Richardson–Lucy deconvolution — not a fixed Gaussian.
+
+Everything runs locally. No image data leaves the machine — no server, no upload.
+
+> **Scope.** This exists to *understand* how reflection recovery and sensor fingerprinting work, and to demonstrate the privacy leakage they expose. It is deliberately honest about its limits ([below](#limitations)). It is a teaching / research instrument, not a courtroom pipeline.
 
 ---
 
-## Running it
+## Repository layout
 
-Camera access requires a secure context, so opening the file directly (`file://`) will not grant the webcam. Serve it over `https://` or `localhost`:
+```
+recon-forensics/
+├── README.md
+├── pyproject.toml            # console entry point: `recon`
+├── requirements.txt
+├── selftest.py               # synthetic ground-truth validation (Python)
+├── recon/                    # Python package
+│   ├── denoise.py            #   wavelet-MMSE denoiser -> PRNU residual
+│   ├── prnu.py               #   fingerprint estimate, zero-mean, Wiener-DFT, NCC, FFT-PCE
+│   ├── registration.py       #   phase-corr (translation) + Fourier-Mellin (rot/scale)
+│   ├── psf.py                #   catchlight PSF estimation
+│   ├── reflection.py         #   FaceMesh ROI -> registered stack -> RL deconv
+│   └── cli.py                #   prnu-enroll / prnu-verify / extract-reflection
+└── web/
+    ├── reflection-recon.html #   standalone build (core is inlined)
+    ├── recon-core.js         #   validated numerical core (source)
+    ├── app.js                #   UI logic (source)
+    ├── reflection-recon.template.html
+    └── test-core.js          #   node validation of the JS core
+```
+
+---
+
+## Python toolkit
+
+### Install
 
 ```bash
-# any static server works
-python3 -m http.server 8000
-# then open http://localhost:8000/reflection-recon.html
+pip install -r requirements.txt          # core: numpy scipy scikit-image PyWavelets
+pip install opencv-python mediapipe      # only for extract-reflection from video
+pip install -e .                         # optional: installs the `recon` command
 ```
 
-Or deploy the single file to any static host (Vercel, Cloudflare Pages, Netlify). No build step — it's one self-contained HTML file that pulls MediaPipe from a CDN at runtime.
+### Validate
 
-**Requirements:** a modern browser (Chromium/Firefox/Safari) with WebGL and `getUserMedia`. Face/eye tracking uses MediaPipe FaceMesh loaded from jsDelivr; the manual-ROI and full-frame modes work without it.
+```bash
+python selftest.py
+# == PRNU identification ==        PASS  (PCE ~33000 match vs ~17 non-match)
+# == Fourier-Mellin registration == PASS  (angle & scale recovered)
+# == Richardson-Lucy deconvolution == PASS
+```
+
+### Use
+
+```bash
+# 1. estimate a sensor fingerprint from flat, bright frames
+recon prnu-enroll ./flat_frames/ -o camA.npy
+
+# 2. test whether an image came from that sensor
+recon prnu-verify suspect.jpg -f camA.npy
+#   NCC : 0.041
+#   PCE : 312.7   (peak at (0, 0))
+#   ==> MATCH (same sensor, likely)
+
+# 3. reconstruct reflected content from an eye/glasses region of a clip
+recon extract-reflection call.mp4 --region glasses --register rst --iters 12 -o out.png
+```
+
+Importable too:
+
+```python
+from recon import estimate_fingerprint, verify, register_rst, estimate_psf
+K = estimate_fingerprint(list_of_flat_frames, sigma=3.0)
+res = verify(test_image, K)          # -> {'ncc':..., 'pce':..., 'peak':(y,x)}
+```
 
 ---
 
-## Mode 1 — Reflection recon
+## Web build
 
-The cornea is a convex mirror (~7.8 mm radius); eyeglass lenses and any shiny object are larger, flatter mirrors. Whatever the subject faces is reflected back toward the camera. This mode isolates that reflective region and pushes it through a reconstruction pipeline.
+Open `web/reflection-recon.html` over a **secure context** (`https://` or `localhost`) so the browser grants the camera:
 
-### Pipeline
-
-```
-source ─▶ FaceMesh landmark lock ─▶ ROI crop (native res)
-       ─▶ sub-pixel registration ─▶ temporal integration
-       ─▶ luma ─▶ Richardson–Lucy deconv ─▶ auto-stretch
-       ─▶ brightness/contrast/gamma ─▶ unsharp ─▶ raw⇄processed blend
+```bash
+cd web && python3 -m http.server 8000     # -> http://localhost:8000/reflection-recon.html
 ```
 
-### Controls
+The file is standalone — the numerical core is inlined; only MediaPipe FaceMesh is pulled from a CDN. Two tabs: **reflection recon** (region select · shift-and-add with translation or rotation+scale registration · on-demand deconvolution · compare slider) and **sensor forensics** (enroll → verify with live NCC + FFT-PCE gauges).
 
-| Group | What it does |
-|---|---|
-| **Target region** | Right eye · left eye · both · glasses (widened lens box) · manual drag-ROI · full frame |
-| **Integration** | Temporal averaging (denoise) or max-hold, with **sub-pixel registration** to align frames before stacking |
-| **Deconvolution** | Richardson–Lucy iterative deblur with an adjustable Gaussian (defocus) PSF |
-| **Enhance** | Luma extraction, 1/99-percentile auto-stretch, brightness/contrast/gamma, unsharp mask |
-| **Compare** | Wipe between the raw single-frame ROI and the fully processed result |
+### Rebuild after editing sources
 
-### How to get a usable result
+`reflection-recon.html` is generated from the template + `recon-core.js` + `app.js`:
 
-Reflection recovery rewards a static, high-signal setup:
-
-- Mount the camera on a **tripod** — registration only corrects translation, not the corneal warp.
-- Use a **bright, high-contrast** target (a monitor showing large text, a window).
-- **Glasses beat eyes** — larger, flatter reflective surface, far more legible.
-- Turn on **integration + registration** and let it stack hundreds of frames.
-- Add **Richardson–Lucy** last, a few iterations at a time. Stop before ringing appears.
-- Use the **compare slider** to confirm you recovered real structure rather than amplifying noise.
+```bash
+cd web
+python3 - <<'PY'
+tpl=open('reflection-recon.template.html').read()
+out=tpl.replace('/*__RECON_CORE__*/',open('recon-core.js').read()).replace('/*__RECON_APP__*/',open('app.js').read())
+open('reflection-recon.html','w').write(out)
+PY
+node test-core.js     # revalidate the core
+```
 
 ---
 
-## Mode 2 — Sensor forensics (PRNU)
+## Methods
 
-Every image sensor imprints a fixed, per-pixel gain pattern from silicon manufacturing variation — **photo-response non-uniformity**. It's multiplicative, survives compression to a degree, and is unique to a physical device. It's a fingerprint.
+### PRNU (Lukáš–Fridrich–Goljan)
 
-This implements the canonical Lukáš–Fridrich–Goljan (2006) workflow:
+Every sensor imprints a fixed per-pixel gain pattern — **photo-response non-uniformity** — from silicon manufacturing variation. It's multiplicative and unique to a physical device.
 
-1. **Residual** — for each frame `I`, denoise and take `W = I − F(I)`.
-2. **ML fingerprint** — because PRNU scales with brightness, estimate `K̂ = Σ(Wᵢ·Iᵢ) / Σ(Iᵢ²)` over many *flat, bright, smooth* frames.
-3. **Clean** — zero-mean every row and column to strip shared CFA/demosaic artifacts, so cameras of the same *model* don't false-match.
-4. **Detect** — correlate a test frame's residual against the predicted signal `I·K̂`; report **NCC** and a **PCE** (peak-to-correlation-energy) statistic.
+1. **Residual** `W = I − F(I)`. Python uses a wavelet-MMSE denoiser (local variance across 3/5/7/9 windows, Wiener shrink); the web build uses a Haar soft-threshold. Both isolate the high-frequency, PRNU-bearing part.
+2. **ML fingerprint** `K̂ = Σ(Wᵢ·Iᵢ) / Σ(Iᵢ²)` over many flat, bright frames — the weighting matters because PRNU scales with brightness.
+3. **Clean** — zero-mean rows/columns, then Wiener-in-DFT (Python), to strip shared CFA/demosaic and periodic artifacts so cameras of the same *model* don't false-match.
+4. **Detect** — correlate a test residual against the predicted signal `I·K̂`; report NCC and PCE.
 
-### Workflow in the tool
+### FFT-PCE (math note)
 
-1. Point the camera at a **blank bright wall** (or defocus toward a bright sky). Click **enroll fingerprint** and let it accumulate frames.
-2. Switch **fingerprint view** to `K̂` to see the estimated pattern.
-3. Click **run verify**. Point at a different scene from the *same* camera → NCC/PCE should lift. Load an image from a *different* device → it should collapse to no-match.
+Peak-to-correlation-energy is computed on the full circular cross-correlation surface
 
-Rule of thumb: **PCE > ~50** is a confident same-sensor match in the literature. Webcam JPEG and low resolution depress the numbers, so treat this as a demonstration of the method, not evidence.
+```
+C = IFFT( FFT(a) · conj(FFT(b)) )          # a = residual, b = predicted PRNU
+```
+
+normalized to unit energy. With the peak at `p`,
+
+```
+PCE = C(p)² / [ (1/(N−|Ω|)) · Σ_{s∉Ω} C(s)² ] · sign(C(p))
+```
+
+where `Ω` is a small exclusion neighborhood around the peak. Unlike raw NCC, PCE is robust to periodic artifacts and thresholds cleanly (**PCE > ~50** ≈ confident same-sensor match).
+
+### Log-polar registration (math note)
+
+Rotation and scale of an image become **translations** in the log-polar transform of its Fourier **magnitude** (which is itself shift-invariant) — the Fourier–Mellin trick (Reddy & Chatterji 1996). We window each image, take `|FFT|`, apply a high-pass emphasis to kill the DC blob, `warp_polar(..., scaling='log')`, then phase-correlate to read off `(angle, log-scale)`. The Fourier magnitude is symmetric, so rotation is only defined mod 180° with a sign ambiguity; we resolve it by testing the candidate transforms and keeping the one whose corrected image best aligns (highest NCC), then recover the residual translation by a final phase correlation.
+
+### Estimated corneal PSF
+
+The catchlight (Purkinje reflection) in an eye is the image of a near-point light source, so its captured shape is a direct sample of the system PSF at that location. We crop the brightest blob, background-subtract, normalize to sum 1, and feed it to Richardson–Lucy — a physically grounded PSF instead of an assumed Gaussian. Falls back to a defocus disc when no clean catchlight is present.
 
 ---
 
 ## Limitations
 
-Stated plainly, because the whole point is to understand the real bounds:
+Stated plainly, because understanding the bounds is the point.
 
 **Reflection recon**
-- Recovers *no* detail the sensor never captured — it is not movie "enhance."
-- At webcam resolution a corneal reflection spans ~20–40 px: you get light sources, window/monitor *shapes*, gross layout, and large high-contrast text — not fine screen content.
-- Registration corrects translation only (no rotation, scale, or the space-varying corneal warp).
-- Richardson–Lucy assumes a spatially invariant Gaussian PSF, which the cornea is not — it's an approximation, and it amplifies noise.
-- Motion, autofocus hunting, and webcam compression are the real enemies.
+- Recovers no detail the sensor never captured — not movie "enhance."
+- At webcam resolution a corneal reflection spans ~20–40 px: light sources, window/monitor *shapes*, gross layout, and large high-contrast text — not fine screen content. Glasses (larger, flatter) shot on a tripod and integrated over hundreds of frames are where legible recovery happens.
+- Registration corrects translation + rotation/scale, but not the space-varying corneal warp.
+- Richardson–Lucy amplifies noise; run it after integration and stop before ringing.
 
 **Sensor forensics**
 - Operates on already-compressed 8-bit frames; RAW is far better.
-- Uses a Gaussian high-pass as a fast stand-in for the wavelet denoiser used in production PRNU.
-- Computes an approximate PCE over decoy shifts rather than a full FFT correlation surface.
+- The web build uses a Haar denoiser and small tiles, so its non-match PCE floats higher than the Python wavelet-MMSE path — trust the NCC sign at low resolution. The Python toolkit is the reference implementation.
+
+**Web build performance**
+- A hand-written radix-2 FFT and log-polar search in JavaScript is far slower than the compiled Python libraries. Use `rot+scale` registration on short clips, run deconvolution on demand. For batch work, use the Python package.
 
 ---
 
 ## Where this technology is used in research
 
-**Reflection / inverse rendering**
-- Privacy attacks on video calls — recovering on-screen text from eyeglass reflections (*Private Eye*, Long et al. 2023) and screen/room reconstruction from the eye (Backes et al., *Reflections of the Invisible*, IEEE S&P 2008–2010).
-- Eye tracking via corneal-glint (Purkinje) reflections — the basis of most commercial eye trackers.
-- Environment capture for graphics/AR, using eyes and chrome surfaces as light probes (Nishino & Nayar, *The World in an Eye*, 2004).
-- Face-liveness / anti-spoofing, and corneal topography in ophthalmology.
+**Reflection / inverse rendering** — privacy attacks on video calls (Long et al., *Private Eye*, 2023; Backes et al., *Reflections of the Invisible*, IEEE S&P 2008–2010); corneal-glint eye tracking; eyes and chrome as light probes for graphics/AR (Nishino & Nayar, *The World in an Eye*, 2004); face-liveness / anti-spoofing; corneal topography.
 
-**Sensor forensics**
-- Source-camera identification and device linking.
-- Tamper/splice localization (a forged region lacks the fingerprint).
-- Deepfake / synthetic-media detection via missing or inconsistent PRNU.
-- Device clustering for image provenance in investigations.
-- Integrity verification for body-cam / dash-cam evidence.
+**Sensor forensics** — source-camera identification and device linking; splice/tamper localization; deepfake detection via missing or inconsistent PRNU; device clustering for provenance in investigations; integrity checks for body/dash-cam evidence.
 
 ---
 
 ## Dual-use note
 
-Both techniques cut both ways.
-
-Reflection recovery is simultaneously a privacy **attack** and the reason to study it **defensively** — blur backgrounds, angle screens away from the camera, and treat glasses on a call as a potential leak.
-
-PRNU is a forensic **defense** that is also a de-anonymization **vector** — the same fingerprint that ties a forgery to a device can link an anonymous source's photos across accounts. Hold both edges in mind before pointing either at real people.
+Both edges cut both ways. Reflection recovery is a privacy **attack** and the reason to defend (blur backgrounds, angle screens away, treat glasses on a call as a leak). PRNU is a forensic **defense** and a de-anonymization **vector** — the same fingerprint that ties a forgery to a device can link an anonymous source's photos across accounts. Hold both in mind before pointing either at real people.
 
 ---
 
-## Tech
+## References
 
-- Single self-contained HTML file, vanilla JS, 2D canvas.
-- [MediaPipe FaceMesh](https://developers.google.com/mediapipe) (refined landmarks, iris) for eye/glasses ROI.
-- All DSP (registration, Gaussian/separable convolution, Richardson–Lucy, PRNU residual/correlation) implemented in-file with typed arrays.
-
-## Roadmap
-
-- Wavelet (Haar/Daubechies) denoiser to replace the Gaussian residual in PRNU.
-- True FFT-based PCE over the full correlation surface.
-- Phase-correlation registration for rotation/scale, not just translation.
-- Estimated corneal PSF for physically grounded deconvolution.
+- J. Lukáš, J. Fridrich, M. Goljan — *Digital Camera Identification from Sensor Pattern Noise*, IEEE TIFS, 2006.
+- M. Chen, J. Fridrich, M. Goljan, J. Lukáš — *Determining Image Origin and Integrity Using Sensor Noise*, IEEE TIFS, 2008.
+- B. S. Reddy, B. N. Chatterji — *An FFT-Based Technique for Translation, Rotation and Scale-Invariant Image Registration*, IEEE TIP, 1996.
+- M. Backes et al. — *Compromising Reflections, or How to Read LCD Monitors Around the Corner*, IEEE S&P, 2008.
+- K. Nishino, S. K. Nayar — *The World in an Eye*, CVPR, 2004.
+- W. H. Richardson (1972); L. B. Lucy (1974) — iterative deconvolution.
 
 ## License
 
-MIT
+TBD — suggest Apache 2.0 to match the rest of the noisyloop tooling.
